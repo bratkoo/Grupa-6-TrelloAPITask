@@ -1,0 +1,22 @@
+[
+    {
+        "id": "6649e8ae4ad55589838250fb",
+        "name": "To do",
+        "board_id": "6649e8ae48d478e65373b854"
+    },
+    {
+        "id": "6651ba524da08cfe7387e95c",
+        "name": "novokreirane kartice",
+        "board_id": "6649e8ae48d478e65373b854"
+    },
+    {
+        "id": "6649e8aef75814f0a8483c01",
+        "name": "Doing",
+        "board_id": "6649e8ae48d478e65373b854"
+    },
+    {
+        "id": "6649e8ae5c6cd545ed4d2855",
+        "name": "Done",
+        "board_id": "6649e8ae48d478e65373b854"
+    }
+]
