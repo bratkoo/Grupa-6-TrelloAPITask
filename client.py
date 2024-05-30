@@ -12,7 +12,7 @@ class TrelloClient:
             'token': self.token
         }
 
-    def get(self, endpoint: str, params: dict = None):
+    def get(self, endpoint: str, params: dict = None)-> str:
         if params is None:
             params = {}
         params.update(self._get_auth_params())

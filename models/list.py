@@ -1,8 +1,14 @@
-from dataclasses import dataclass
-from typing import List
+from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy.orm import relationship
+from .base import Base
 
-@dataclass
-class List:
-    id: str
-    name: str
-    board_id: str
+class List(Base):
+    __tablename__ = 'lists'
+
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    board_id = Column(String, ForeignKey('boards.id'))
+
+
+    board = relationship("Board", back_populates="lists")
+    cards = relationship("Card", back_populates="list", primaryjoin="List.id == Card.list_id")

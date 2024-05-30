@@ -1,119 +1,75 @@
-import json
-from client import TrelloClient
-from models.board import Board
-from models.list import List
-from models.card import Card, Attachment
-from models.checklist import Checklist
-from dataclasses import asdict
+import sqlalchemy
+from fastapi import FastAPI, BackgroundTasks
+from pydantic import BaseModel
+import httpx
+import requests
+from sqlalchemy.orm import sessionmaker
 
-API_KEY = '74cb777096ebf5bf89ba2ce5dbcc7391'
-TOKEN = 'ATTAc1c8511419cdc00070a57b8955872a5e96ef67da82831fc1c975d5b073f74d6bE80CE80E'
-BOARD_ID = '6649e8ae48d478e65373b854'
-LIST_ID = '6649e8ae4ad55589838250fb'  # ID to do lista
+from models.card import Card
+from database import Database
+from sqlalchemy import create_engine
+from typing import List, Optional
 
-#6649e8aef75814f0a8483c01 ID doing lista
-#6649e8ae5c6cd545ed4d2855 ID done lista
+app = FastAPI()
 
-client = TrelloClient(api_key=API_KEY, token=TOKEN)
+TRELLO_API_KEY = "74cb777096ebf5bf89ba2ce5dbcc7391"
+TRELLO_API_TOKEN = "ATTAc1c8511419cdc00070a57b8955872a5e96ef67da82831fc1c975d5b073f74d6bE80CE80E"
 
-def dataclass_to_dict(obj):
-    if isinstance(obj, list):
-        return [dataclass_to_dict(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {key: dataclass_to_dict(value) for key, value in obj.items()}
-    elif hasattr(obj, "__dataclass_fields__"):
-        return {key: dataclass_to_dict(value) for key, value in asdict(obj).items()}
-    else:
-        return obj
+DATABASE_URL = "sqlite:///trello.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = sqlalchemy.orm.declarative_base()
 
-def fetch_board(board_id):
-    endpoint = f'boards/{board_id}'
-    data = client.get(endpoint)
-    board = Board(id=data['id'], name=data['name'], url=data['url'])
-    return board
+class CardUpdate(BaseModel):
+    id: str
+    title: Optional[str]
+    description: Optional[str]
+    list_id: Optional[str]
 
-def fetch_lists(board_id):
-    endpoint = f'boards/{board_id}/lists'
-    data = client.get(endpoint)
-    lists = [List(id=item['id'], name=item['name'], board_id=board_id) for item in data]
-    return lists
-
-def fetch_cards(list_id):
-    endpoint = f'lists/{list_id}/cards'
-    data = client.get(endpoint)
-    cards = []
-    for item in data:
-        attachments_endpoint = f'cards/{item["id"]}/attachments'
-        attachments_data = client.get(attachments_endpoint)
-        attachments = [Attachment(id=att['id'], name=att['name'], url=att['url']) for att in attachments_data]
-        card = Card(id=item['id'], name=item['name'], desc=item.get('desc'), list_id=list_id, attachments=attachments)
-        cards.append(card)
-    return cards
-
-def fetch_checklists(card_id):
-    endpoint = f'cards/{card_id}/checklists'
-    data = client.get(endpoint)
-    checklists = []
-    for item in data:
-        checklist = Checklist(id=item['id'], name=item['name'], card_id=card_id, items=[check['name'] for check in item['checkItems']])
-        checklists.append(checklist)
-    return checklists
-
-def save_to_file(data, filename):
-    with open(filename, 'w') as f:
-        json.dump(dataclass_to_dict(data), f, indent=4)
-
-def load_from_file(filename):
-    with open(filename, 'r') as f:
-        return json.load(f)
-
-def create_card(list_id, name, desc=''):
-    endpoint = 'cards'
-    data = {
-        'idList': list_id,
-        'name': name,
-        'desc': desc
+async def get_cards_from_trello(board_id: str) -> List[CardUpdate]:
+    url = f"https://api.trello.com/1/boards/{board_id}/cards"
+    params = {
+        "key": TRELLO_API_KEY,
+        "token": TRELLO_API_TOKEN
     }
-    return client.post(endpoint, data=data)
-
-def main():
-    # uzimanje boarda
-    board = fetch_board(BOARD_ID)
-    save_to_file(board, 'board.json')
-
-    # uzimanje liste
-    lists = fetch_lists(BOARD_ID)
-    save_to_file(lists, 'lists.json')
-
-    # uzimanje kartice checkliste
-    all_cards = []
-    all_checklists = []
-    for lst in lists:
-        cards = fetch_cards(lst.id)
-        all_cards.extend(cards)
-        for card in cards:
-            checklists = fetch_checklists(card.id)
-            all_checklists.extend(checklists)
-
-    save_to_file(all_cards, 'cards.json')
-    save_to_file(all_checklists, 'checklists.json')
-
-    # loadujemo fajlove
-    print("\nLoaded data from files:")
-    print("Board:", load_from_file('board.json'))
-    print("Liste:", load_from_file('lists.json'))
-    print("Kartice:", load_from_file('cards.json'))
-    print("Ceckliste:", load_from_file('checklists.json'))
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        cards = response.json()
+        return [CardUpdate(**{key: card[key] for key in CardUpdate.__annotations__.keys() if key in card}) for card in cards]
 
 
-    list_id = input('Unesite list id: ')
-    name = input('Unesite ime kartice: ')
-    desc = input('Unesite opis kartice: ')
+def get_card_by_id(card_id):
+    with SessionLocal() as session:
+        card = session.query(Card).filter_by(id=card_id).first()
+        return card
 
 
-    print('Pravljenje nove kartice')
-    new_card = create_card(list_id, name, desc)
-    print(f"Nova kartica ID: {new_card['id']}, Ime: {new_card['name']}, Opis: {new_card['desc']}")
+async def save_cards_to_database(cards: List[CardUpdate]):
+    db = Database(DATABASE_URL)
+    for card_update in cards:
+        card_id = card_update.id
+        existing_card = get_card_by_id(card_id)
+        if existing_card is None:
+            new_card = Card(
+                id=card_update.id,
+                title=card_update.title,
+                description=card_update.description,
+                list_id=card_update.list_id
+            )
+            await db.create(new_card)
+        else:
+            existing_card.title = card_update.title
+            existing_card.description = card_update.description
+            existing_card.list_id = card_update.list_id
+            await db.update(existing_card)
 
-if __name__ == '__main__':
-    main()
+@app.post("/update-cards/{board_id}")
+async def update_cards(background_tasks: BackgroundTasks, board_id: str):
+    cards_from_trello = await get_cards_from_trello(board_id)
+    background_tasks.add_task(save_cards_to_database, cards_from_trello)
+    return {"message": f"Baza kartica azurirana za board ID: {board_id}"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
