@@ -1,11 +1,8 @@
-from sqlalchemy import Column, String, ForeignKey
-from sqlalchemy.orm import relationship
-from .base import Base
+from dataclasses import dataclass
 
-class Board(Base):
-    __tablename__ = 'boards'
 
-    id = Column(String, primary_key=True)
-    name = Column(String)
-
-    lists = relationship("List", back_populates="board")
+@dataclass
+class Board:
+    id: str
+    name: str
+    desc: str
